@@ -1,0 +1,18 @@
+{
+  "name": "madden-gm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only Madden 27 franchise exporter + MCP server so Claude can act as your GM",
+  "scripts": {
+    "export": "node exporter/export.js",
+    "start": "node server/server.js"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.0",
+    "express": "^5.1.0",
+    "madden-franchise": "^4.3.7",
+    "zod": "^3.25.0"
+  }
+}

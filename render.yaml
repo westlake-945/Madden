@@ -1,0 +1,21 @@
+# Render Blueprint: New > Blueprint > pick this repo. Fill in the secret env vars when prompted.
+services:
+  - type: web
+    name: madden-gm
+    runtime: node
+    plan: free
+    branch: main
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GITHUB_REPO
+        sync: false
+      - key: MCP_PATH
+        sync: false
+      - key: GITHUB_BRANCH
+        value: data
+      - key: CAP_UNIT
+        value: "10000"
