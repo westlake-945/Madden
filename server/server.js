@@ -109,7 +109,7 @@ function buildServer() {
   }));
 
   server.registerTool('get_cap_sheet', {
-    description: "User team's contracts sorted by cap hit, plus expiring deals. Use for re-sign/cut/restructure decisions.",
+    description: "User team's contracts sorted by cap hit, plus expiring deals (players in their final season). yearsLeft counts the current season. Use for re-sign/cut/restructure decisions.",
     inputSchema: {}
   }, safe((snap) => {
     const t = userTeam(snap);
@@ -119,7 +119,8 @@ function buildServer() {
       playerSalaries: teamMoney(t.cap.payrollRaw),
       deadMoney: { thisYear: teamMoney(t.cap.penaltiesThisYearRaw), nextYear: teamMoney(t.cap.penaltiesNextYearRaw) },
       contracts: mine.sort((a, b) => (b.capHitRaw ?? 0) - (a.capHitRaw ?? 0)).map((p) => brief(snap, p)),
-      expiring: mine.filter((p) => p.contractStatus === 'Expiring' || p.contract?.yearsLeft === 0).map((p) => brief(snap, p))
+      // yearsLeft includes the current season (verified in-game), so 1 = final year.
+      expiring: mine.filter((p) => p.contractStatus === 'Expiring' || p.contract?.yearsLeft === 1).map((p) => brief(snap, p))
     };
   }));
 
@@ -154,13 +155,17 @@ function buildServer() {
   }, safe((snap, a) => {
     const me = userTeam(snap).teamIndex;
     const validTeams = new Set(snap.teams.map((t) => t.teamIndex));
+    // Signable = on a league team, or an actual free agent. Excludes hidden legends,
+    // created placeholders, and Pro Bowl copies that sit on non-league teams.
+    const signable = (p) => validTeams.has(p.teamIndex) || p.contractStatus === 'FreeAgent';
     return snap.players
       .filter((p) =>
         (!a.position || p.pos?.toLowerCase() === a.position.toLowerCase()) &&
         (a.minOvr == null || p.ovr >= a.minOvr) &&
         (a.maxAge == null || p.age <= a.maxAge) &&
         (!a.dev || p.dev?.toLowerCase().includes(a.dev.toLowerCase())) &&
-        (!a.freeAgentsOnly || p.contractStatus === 'FreeAgent' || !validTeams.has(p.teamIndex)) &&
+        signable(p) &&
+        (!a.freeAgentsOnly || p.contractStatus === 'FreeAgent') &&
         (!a.excludeMyTeam || p.teamIndex !== me))
       .sort((x, y) => y.ovr - x.ovr)
       .slice(0, a.limit)
