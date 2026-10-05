@@ -174,8 +174,10 @@ function buildServer() {
 
   // ---------- draft ----------
   const publicProspect = (p, reveal) => {
-    const { hidden, ...pub } = p;
-    return reveal ? { ...pub, trueRank: hidden.trueRank, ovr: hidden.ovr, dev: hidden.dev, ratings: hidden.ratings } : pub;
+    // Madden stores ranks 0-indexed; show 1-based. College isn't resolvable from the save yet.
+    const { hidden, college, ...rest } = p;
+    const pub = { ...rest, projectedRank: rest.projectedRank != null ? rest.projectedRank + 1 : null };
+    return reveal ? { ...pub, trueRank: hidden.trueRank != null ? hidden.trueRank + 1 : null, ovr: hidden.ovr, dev: hidden.dev, ratings: hidden.ratings } : pub;
   };
   const draftOf = (snap) => {
     if (!snap.draft?.prospects?.length) throw new Error('No draft class in this snapshot. Re-run the exporter (v0.2+).');
@@ -213,7 +215,10 @@ function buildServer() {
   server.registerTool('get_my_draft_picks', {
     description: "The user's draft picks (yearOffset 0 = upcoming draft), including picks acquired from other teams.",
     inputSchema: {}
-  }, safe((snap) => snap.draft?.myPicks ?? []));
+  }, safe((snap) => (snap.draft?.myPicks ?? []).map((p) => ({
+    // Round and pick are stored 0-indexed; pick is the overall pick number.
+    round: p.round + 1, overallPick: p.pick + 1, draft: p.yearOffset === 0 ? 'upcoming' : `+${p.yearOffset} year`, originalTeam: p.from
+  }))));
 
   return server;
 }
