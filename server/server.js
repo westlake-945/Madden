@@ -68,7 +68,7 @@ const safe = (fn) => async (args) => {
 
 // ---------- tools ----------
 function buildServer() {
-  const server = new McpServer({ name: 'madden-gm', version: '0.1.0' });
+  const server = new McpServer({ name: 'madden-gm', version: '0.2.0' });
 
   server.registerTool('get_franchise_overview', {
     description: "Season/week, the user's team record, ranks, cap room, and when the snapshot was exported. Call this first.",
@@ -171,6 +171,49 @@ function buildServer() {
       .slice(0, a.limit)
       .map((p) => brief(snap, p));
   }));
+
+  // ---------- draft ----------
+  const publicProspect = (p, reveal) => {
+    const { hidden, ...pub } = p;
+    return reveal ? { ...pub, trueRank: hidden.trueRank, ovr: hidden.ovr, dev: hidden.dev, ratings: hidden.ratings } : pub;
+  };
+  const draftOf = (snap) => {
+    if (!snap.draft?.prospects?.length) throw new Error('No draft class in this snapshot. Re-run the exporter (v0.2+).');
+    return snap.draft;
+  };
+
+  server.registerTool('get_draft_class', {
+    description: "Draft prospects with public info: projected rank, position, college, size, production grade, combine/pro-day numbers (empty until those scouting stages happen). True OVR, dev trait and ratings are hidden in-game by scouting fog: only set showTrueRatings when the user explicitly asks to see them.",
+    inputSchema: {
+      position: z.string().optional().describe('e.g. LOLB, C, DT, K'),
+      limit: z.number().optional().default(25),
+      sortBy: z.enum(['projection', 'trueRank', 'ovr']).optional().default('projection'),
+      showTrueRatings: z.boolean().optional().default(false)
+    }
+  }, safe((snap, { position, limit, sortBy, showTrueRatings }) => {
+    if (!showTrueRatings && sortBy !== 'projection') throw new Error('Sorting by trueRank/ovr reveals hidden info. Set showTrueRatings: true only if the user asked for it.');
+    const key = { projection: (p) => p.projectedRank ?? 999, trueRank: (p) => p.hidden.trueRank ?? 999, ovr: (p) => -(p.hidden.ovr ?? 0) }[sortBy];
+    return draftOf(snap).prospects
+      .filter((p) => !position || [p.pos, p.draftPos].some((x) => x?.toLowerCase() === position.toLowerCase()))
+      .sort((a, b) => key(a) - key(b))
+      .slice(0, limit)
+      .map((p) => publicProspect(p, showTrueRatings));
+  }));
+
+  server.registerTool('get_draft_prospect', {
+    description: 'One prospect in detail. Same fog-of-war rule as get_draft_class for showTrueRatings.',
+    inputSchema: { name: z.string(), showTrueRatings: z.boolean().optional().default(false) }
+  }, safe((snap, { name, showTrueRatings }) => {
+    const s = name.toLowerCase();
+    const hits = draftOf(snap).prospects.filter((p) => p.name.toLowerCase().includes(s));
+    if (!hits.length) throw new Error(`No prospect matches "${name}".`);
+    return hits.slice(0, 5).map((p) => publicProspect(p, showTrueRatings));
+  }));
+
+  server.registerTool('get_my_draft_picks', {
+    description: "The user's draft picks (yearOffset 0 = upcoming draft), including picks acquired from other teams.",
+    inputSchema: {}
+  }, safe((snap) => snap.draft?.myPicks ?? []));
 
   return server;
 }

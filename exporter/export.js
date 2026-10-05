@@ -150,6 +150,87 @@ async function resolveContract(franchise, ref, cache) {
   }
 }
 
+// ---------- draft class + picks ----------
+// Generic reference resolver: 32-bit string, first 15 bits = table id, rest = row.
+const refTables = new Map();
+async function recordAt(franchise, ref, fields) {
+  if (typeof ref !== 'string' || /^0+$/.test(ref)) return null;
+  const tableId = parseInt(ref.slice(0, 15), 2);
+  const row = parseInt(ref.slice(15), 2);
+  let table = refTables.get(tableId);
+  if (!table) {
+    table = franchise.getTableById(tableId);
+    if (!table) return null;
+    await table.readRecords(fields);
+    refTables.set(tableId, table);
+  }
+  const rec = table.records[row];
+  return rec && !rec.isEmpty ? rec : null;
+}
+
+const DRAFT_FIELDS = [
+  'Player', 'DraftPosition', 'InitialDraftRank', 'TrueOverallRanking', 'ProductionGrade', 'IsVisible',
+  'CombineFortyYardDash', 'CombineBenchPress', 'CombineVerticalJump', 'CombineBroadJump',
+  'CombineTwentyYardShuttle', 'CombineThreeConeDrill', 'CombineOverallGrade',
+  'ProDayFortyYardDash', 'ProDayBenchPress', 'ProDayVerticalJump', 'ProDayBroadJump',
+  'ProDayTwentyYardShuttle', 'ProDayThreeConeDrill'
+];
+
+async function exportDraft(franchise, userTeamIndex) {
+  const draftRecs = await readTable(franchise, 'DraftPlayer', DRAFT_FIELDS);
+  const prospects = [];
+  for (const d of draftRecs) {
+    if (d.IsVisible === false) continue;
+    const p = await recordAt(franchise, d.Player, [...PLAYER_FIELDS, 'College']);
+    if (!p) continue;
+    const college = await recordAt(franchise, p.College, ['Name']);
+    const ratings = {};
+    for (const f of RATING_FIELDS) ratings[f.replace('Rating', '')] = p[f];
+    prospects.push({
+      name: `${p.FirstName} ${p.LastName}`.trim(),
+      pos: enumName(p.Position),
+      draftPos: enumName(d.DraftPosition),
+      college: college?.Name ?? null,
+      age: p.Age,
+      height: p.Height,
+      weight: p.Weight != null ? p.Weight + 160 : null,
+      projectedRank: d.InitialDraftRank,
+      productionGrade: d.ProductionGrade,
+      combine: {
+        forty: d.CombineFortyYardDash, bench: d.CombineBenchPress, vertical: d.CombineVerticalJump,
+        broad: d.CombineBroadJump, shuttle: d.CombineTwentyYardShuttle, cone: d.CombineThreeConeDrill,
+        grade: d.CombineOverallGrade
+      },
+      proDay: {
+        forty: d.ProDayFortyYardDash, bench: d.ProDayBenchPress, vertical: d.ProDayVerticalJump,
+        broad: d.ProDayBroadJump, shuttle: d.ProDayTwentyYardShuttle, cone: d.ProDayThreeConeDrill
+      },
+      // Hidden by Madden's scouting fog in-game; the server only reveals these on request.
+      hidden: {
+        trueRank: d.TrueOverallRanking,
+        ovr: p.OverallRating,
+        dev: DEV_MAP[enumName(p.TraitDevelopment)] ?? enumName(p.TraitDevelopment),
+        ratings
+      }
+    });
+  }
+
+  const myPicks = [];
+  try {
+    const pickRecs = await readTable(franchise, 'DraftPick', ['CurrentTeam', 'OriginalTeam', 'PickNumber', 'Round', 'YearOffset']);
+    for (const pk of pickRecs) {
+      const cur = await recordAt(franchise, pk.CurrentTeam, TEAM_FIELDS);
+      if (!cur || cur.TeamIndex !== userTeamIndex) continue;
+      const orig = await recordAt(franchise, pk.OriginalTeam, TEAM_FIELDS);
+      myPicks.push({ round: pk.Round, pick: pk.PickNumber, yearOffset: pk.YearOffset, from: orig?.ShortName ?? null });
+    }
+    myPicks.sort((a, b) => a.yearOffset - b.yearOffset || a.round - b.round || a.pick - b.pick);
+  } catch (e) {
+    console.log(`  Draft picks skipped: ${e.message}`);
+  }
+  return { prospects, myPicks };
+}
+
 async function main() {
   // Work on a temp copy so the real save is never touched.
   const tmp = path.join(os.tmpdir(), `madden-gm-${Date.now()}`);
@@ -262,6 +343,17 @@ async function main() {
   const rooms = teams.map((t) => t.cap.roomRaw / 100).sort((x, y) => x - y);
   console.log(`  League cap room range: $${rooms[0].toFixed(1)}M to $${rooms.at(-1).toFixed(1)}M`);
 
+  let draft = { prospects: [], myPicks: [] };
+  try {
+    draft = await exportDraft(franchise, userTeamIndex);
+    const thisYear = draft.myPicks.filter((p) => p.yearOffset === 0).map((p) => `R${p.round}${p.pick ? `#${p.pick}` : ''}`);
+    console.log(`  Draft: ${draft.prospects.length} prospects | your picks this year: ${thisYear.join(', ') || 'none found'}`);
+    const top = [...draft.prospects].sort((a, b) => (a.projectedRank ?? 999) - (b.projectedRank ?? 999))[0];
+    if (top) console.log(`  Draft sanity: top projected prospect ${top.name}, ${top.pos}, ${top.college}, rank ${top.projectedRank}, forty raw=${top.combine.forty}`);
+  } catch (e) {
+    console.log(`  Draft export skipped: ${e.message}`);
+  }
+
   const snapshot = {
     exportedAt: new Date().toISOString(),
     gameYear: franchise.gameYear ?? null,
@@ -272,7 +364,8 @@ async function main() {
       stage: enumName(seasonRec?.CurrentStage)
     },
     teams,
-    players
+    players,
+    draft
   };
 
   await fs.writeFile(OUT_FILE, JSON.stringify(snapshot));

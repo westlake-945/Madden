@@ -67,6 +67,9 @@ Advance the week in Madden → back out to the menu (so the autosave writes) →
 | `get_injuries` | Injury report for any team |
 | `get_standings` | League table |
 | `search_players` | Trade and free-agent targets by position, OVR, age, dev |
+| `get_draft_class` | Prospects with public info (projection, college, size, combine/pro day). True ratings only with `showTrueRatings` |
+| `get_draft_prospect` | One prospect in detail, same fog-of-war rule |
+| `get_my_draft_picks` | Your picks, including ones acquired from other teams |
 
 ## Save-format notes (verified against a Madden 27 save)
 - Money is stored in **$10k units** (`CAP_UNIT=10000`).
@@ -77,5 +80,5 @@ Advance the week in Madden → back out to the menu (so the autosave writes) →
 - `Team.IsUserManaged` isn't stored; the user team comes from the `Coach` with `IsUserControlled`. Override with `MY_TEAM=CLE`.
 - Contract refs are 32-bit strings: first 15 bits are the table id, the rest is the row (`PlayerContract`).
 
-## Ideas for v0.2
-Depth chart, schedule/results (`SeasonGame`), draft class plus scouting board, season stats.
+## Ideas for v0.3
+Depth chart, schedule/results (`SeasonGame`), season stats.
